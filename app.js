@@ -86,6 +86,7 @@ var App = ((function(canvas) {
             ctx.lineJoin = "round";
             ctx.lineWidth = 4;
 
+            ctx.beginPath();
             ctx.moveTo(x,y);
         };
 
@@ -100,6 +101,7 @@ var App = ((function(canvas) {
         this.end = function(x, y, ctx) {
             ctx.lineTo(x, y);
             ctx.stroke();
+            ctx.closePath();
         };
     };
 
@@ -107,21 +109,20 @@ var App = ((function(canvas) {
     /*
      * Should handle all the drawing logic
      */
-    var DrawController = function(canvas, paths, tool) {
+    var Painter = function(canvas, tool) {
         var _ctx = canvas.getContext("2d");
         var _clone = canvas.cloneNode().getContext("2d");
         var _snapshot = canvas.cloneNode().getContext("2d");
-        var _currentPath = [];
 
         var render = function() {
+
             _ctx.clearRect(0, 0, canvas.width, canvas.height);
 
             _ctx.drawImage(_snapshot.canvas, 0, 0);
             _ctx.drawImage(_clone.canvas, 0, 0);
         };
 
-        this.onDrawStart = function(wayPoint) {
-            _currentPath = [wayPoint];
+        this.drawStart = function(wayPoint) {
 
             _snapshot.drawImage(canvas, 0, 0);
             _clone.clearRect(0, 0, canvas.width, canvas.height);
@@ -130,27 +131,55 @@ var App = ((function(canvas) {
             render();
         };
 
-        this.onDrawAt = function(wayPoint) {
-            _currentPath.push(wayPoint);
+        this.drawAt = function(wayPoint) {
 
             tool.draw(wayPoint.x, wayPoint.y, _clone);
             render();
         };
 
-        this.onDrawEnd = function(wayPoint) {
-            _currentPath.push(wayPoint);
-            paths.push(_currentPath);
-
+        this.drawEnd = function(wayPoint) {
             tool.end(wayPoint.x, wayPoint.y, _clone);
             _snapshot.drawImage(canvas, 0, 0);
 
             render();
         };
 
-        this.clear = function() {_ctx.clearRect(0, 0, canvas.width, canvas.height);}
+        this.clear = function() {
+            _ctx.clearRect(0, 0, canvas.width, canvas.height);
+            _snapshot.clearRect(0, 0, canvas.width, canvas.height);
+            _clone.clearRect(0, 0, canvas.width, canvas.height);
+        }
     };
 
-    var ReplayController = function(timer, canvas, paths, tool) {
+    /*
+     * Should listen to draw events, record paths and delegate render to Painter
+     */
+    var DrawController = function(painter, paths) {
+        var _currentPath = [];
+
+        this.onDrawStart = function(wayPoint) {
+            _currentPath = [wayPoint];
+            painter.drawStart(wayPoint);
+        };
+
+        this.onDrawAt = function(wayPoint) {
+            _currentPath.push(wayPoint);
+            painter.drawAt(wayPoint);
+        };
+
+        this.onDrawEnd = function(wayPoint) {
+            _currentPath.push(wayPoint);
+            paths.push(_currentPath);
+
+            painter.drawEnd(wayPoint);
+        };
+    };
+
+
+    /*
+     * Implements replay logic
+     */
+    var ReplayController = function(timer, painter) {
 
         var asyncLoop = function(collection, action, onDone) {
             onDone = (onDone || function() {});
@@ -164,7 +193,6 @@ var App = ((function(canvas) {
         };
 
         this.replay = function() {
-            var painter = new DrawController(canvas, [], tool); // FIXME: refactor draw controller
             painter.clear();
 
             asyncLoop(paths, function(path, next) {
@@ -175,16 +203,16 @@ var App = ((function(canvas) {
                 var start = path[0];
                 var end = path[path.length-1];
 
-                painter.onDrawStart(start);
+                painter.drawStart(start);
                 asyncLoop(path, function(wayPoint, next) {
                     timer(function() {
-                        painter.onDrawAt(wayPoint);
+                        painter.drawAt(wayPoint);
                         next();
 
                     }, wayPoint.deltaTime);
 
                 }, function() {
-                    painter.onDrawEnd(end);
+                    painter.drawEnd(end);
                     next();
                 });
             });
@@ -197,10 +225,12 @@ var App = ((function(canvas) {
     // hook it together :)
 
     var paths = [];  // I'm a horrible developer :P
+
     var input = new InputHandler(canvas);
     var tool = new BrushTool();
-    var drawController = new DrawController(canvas, paths, tool);
-    var replayController = new ReplayController(setTimeout, canvas, paths, tool);
+    var painter = new Painter(canvas, tool);
+    var drawController = new DrawController(painter, paths);
+    var replayController = new ReplayController(setTimeout, painter);
 
     input.onDrawStart(drawController.onDrawStart);
     input.onDrawAt(drawController.onDrawAt);
@@ -209,7 +239,8 @@ var App = ((function(canvas) {
 
     return {
         paths : paths,
-        replayController : replayController
+        replayController : replayController,
+        painter : painter
     }
 
 
