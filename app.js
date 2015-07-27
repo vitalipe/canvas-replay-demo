@@ -3,8 +3,11 @@
  */
 
 // vanilla js FTW!!!! :P
-var App = ((function(canvas) {
+var App = ((function() {
     "use strict";
+
+    var canvas = document.getElementById("viewport");
+    var replayButton = document.getElementById("replay-button");
 
     /*
      * This Class abstracts input event management, and will
@@ -16,18 +19,18 @@ var App = ((function(canvas) {
         var _onDrawAt = function() {};
         var _onDrawEnd = function() {};
         var _state = null;
-        var _lastUpdate = null;
+        var _firstUpdate = null;
 
         var createWayPoint = function(e, initialTime) {
             var  rect = element.getBoundingClientRect();
-            var offset = initialTime ? initialTime : _lastUpdate;
 
-            _lastUpdate = e.timeStamp;
+            if (initialTime)
+                _firstUpdate = e.timeStamp;
 
             return {
                 x : e.pageX - rect.left,
                 y : e.pageY - rect.top,
-                deltaTime : (e.timeStamp - offset)
+                deltaTime : (e.timeStamp - _firstUpdate)
             };
         };
 
@@ -67,7 +70,6 @@ var App = ((function(canvas) {
         element.addEventListener("mousedown", handleInputEvent);
 
         _state = WaitingState;
-
 
         // public
         this.onDrawStart = function(handler) { _onDrawStart = handler; };
@@ -175,47 +177,70 @@ var App = ((function(canvas) {
         };
     };
 
+    // because real men don't use libraries :P
+    var asyncLoop = function(collection, action, onDone) {
+        onDone = (onDone || function() {});
+
+        if (collection.length === 0 )
+            return onDone();
+
+        action(collection[0], function() {
+            asyncLoop(collection.slice(1), action, onDone);
+        });
+    };
 
     /*
-     * Implements replay logic
+     * Implements all the nasty async replay logic
      */
-    var ReplayController = function(timer, painter) {
-
-        var asyncLoop = function(collection, action, onDone) {
-            onDone = (onDone || function() {});
-
-            if (collection.length === 0 )
-                return onDone();
-
-            action(collection[0], function() {
-                asyncLoop(collection.slice(1), action, onDone);
-            });
-        };
+    var ReplayController = function(painter) {
+        var _locked = false;
 
         this.replay = function() {
+            if (_locked)
+                return;
+
+            _locked = true;
             painter.clear();
 
             asyncLoop(paths, function(path, next) {
 
                 if (path.length === 0)
-                    return;
+                    return next();
 
-                var start = path[0];
-                var end = path[path.length-1];
+                var offsetTime = null; // from the first anim frame
+                var index = 0;
 
-                painter.drawStart(start);
-                asyncLoop(path, function(wayPoint, next) {
-                    timer(function() {
-                        painter.drawAt(wayPoint);
-                        next();
+                var renderWayPoint = function(index) {
+                    if (index === 0)
+                        painter.drawStart(path[0]);
 
-                    }, wayPoint.deltaTime);
+                    if (index === path.length-1)
+                        painter.drawEnd(path[index]);
 
-                }, function() {
-                    painter.drawEnd(end);
-                    next();
-                });
-            });
+                    painter.drawAt(path[index]);
+                };
+
+                var renderNextFrame = function(timestamp) {
+                    if (!offsetTime)
+                        offsetTime = timestamp;
+
+                    var currentTime = (timestamp - offsetTime);
+
+                    while (path[index].deltaTime <= currentTime) {
+                        if (index === path.length-1)
+                            return next();
+
+                        renderWayPoint(index);
+                        index++;
+                    }
+
+                    requestAnimationFrame(renderNextFrame);
+                };
+
+                // dispatch first
+                requestAnimationFrame(renderNextFrame);
+
+            }, function() { _locked = false});
         }
 
     };
@@ -223,18 +248,19 @@ var App = ((function(canvas) {
 
 
     // hook it together :)
-
     var paths = [];  // I'm a horrible developer :P
 
     var input = new InputHandler(canvas);
     var tool = new BrushTool();
     var painter = new Painter(canvas, tool);
     var drawController = new DrawController(painter, paths);
-    var replayController = new ReplayController(setTimeout, painter);
+    var replayController = new ReplayController(painter);
 
     input.onDrawStart(drawController.onDrawStart);
     input.onDrawAt(drawController.onDrawAt);
     input.onDrawEnd(drawController.onDrawEnd);
+
+    replayButton.addEventListener("click", replayController.replay);
 
 
     return {
@@ -243,5 +269,4 @@ var App = ((function(canvas) {
         painter : painter
     }
 
-
-})(document.getElementById("viewport")));
+})());
