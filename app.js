@@ -3,7 +3,7 @@
  */
 
 // vanilla js FTW!!!! :P
-((function(canvas) {
+var App = ((function(canvas) {
     "use strict";
 
     /*
@@ -16,18 +16,23 @@
         var _onDrawAt = function() {};
         var _onDrawEnd = function() {};
         var _state = null;
+        var _lastUpdate = null;
 
-        var createWayPoint = function(e) {
+        var createWayPoint = function(e, initialTime) {
             var  rect = element.getBoundingClientRect();
+            var offset = initialTime ? initialTime : _lastUpdate;
+
+            _lastUpdate = e.timeStamp;
+
             return {
-                x : e.pageX - (rect.left),
-                y : e.pageY - (rect.top),
-                time : Date.now()
+                x : e.pageX - rect.left,
+                y : e.pageY - rect.top,
+                deltaTime : (e.timeStamp - offset)
             };
         };
 
         var WaitingState = function(e) {
-            var wayPoint = createWayPoint(e);
+            var wayPoint = createWayPoint(e, e.timeStamp);
             if (e.which != 1)// accept only left clicks
                 return;
 
@@ -133,6 +138,7 @@
         };
 
         this.onDrawEnd = function(wayPoint) {
+            _currentPath.push(wayPoint);
             paths.push(_currentPath);
 
             tool.end(wayPoint.x, wayPoint.y, _clone);
@@ -140,21 +146,71 @@
 
             render();
         };
+
+        this.clear = function() {_ctx.clearRect(0, 0, canvas.width, canvas.height);}
+    };
+
+    var ReplayController = function(timer, canvas, paths, tool) {
+
+        var asyncLoop = function(collection, action, onDone) {
+            onDone = (onDone || function() {});
+
+            if (collection.length === 0 )
+                return onDone();
+
+            action(collection[0], function() {
+                asyncLoop(collection.slice(1), action, onDone);
+            });
+        };
+
+        this.replay = function() {
+            var painter = new DrawController(canvas, [], tool); // FIXME: refactor draw controller
+            painter.clear();
+
+            asyncLoop(paths, function(path, next) {
+
+                if (path.length === 0)
+                    return;
+
+                var start = path[0];
+                var end = path[path.length-1];
+
+                painter.onDrawStart(start);
+                asyncLoop(path, function(wayPoint, next) {
+                    timer(function() {
+                        painter.onDrawAt(wayPoint);
+                        next();
+
+                    }, wayPoint.deltaTime);
+
+                }, function() {
+                    painter.onDrawEnd(end);
+                    next();
+                });
+            });
+        }
+
     };
 
 
 
     // hook it together :)
-    // I'm a horrible developer :P
-    var paths = [];
+
+    var paths = [];  // I'm a horrible developer :P
     var input = new InputHandler(canvas);
     var tool = new BrushTool();
     var drawController = new DrawController(canvas, paths, tool);
+    var replayController = new ReplayController(setTimeout, canvas, paths, tool);
 
     input.onDrawStart(drawController.onDrawStart);
     input.onDrawAt(drawController.onDrawAt);
     input.onDrawEnd(drawController.onDrawEnd);
 
+
+    return {
+        paths : paths,
+        replayController : replayController
+    }
 
 
 })(document.getElementById("viewport")));
