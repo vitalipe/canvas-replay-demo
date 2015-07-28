@@ -79,7 +79,7 @@ var App = ((function() {
     };
 
     /*
-     * A simple implementation for a tool interface
+     * A simple implementation of a tool interface
      */
     var BrushTool = function() {
         this.start = function(x, y, ctx) {
@@ -109,47 +109,47 @@ var App = ((function() {
 
 
     /*
-     * Should handle all the drawing logic
+     * Should handle all the drawing logic, for now it only uses a single tool
      */
     var Painter = function(canvas, tool) {
-        var _ctx = canvas.getContext("2d");
-        var _clone = canvas.cloneNode().getContext("2d");
+        var _surface = canvas.getContext("2d");
+        var _toolSurface = canvas.cloneNode().getContext("2d");
         var _snapshot = canvas.cloneNode().getContext("2d");
 
         var render = function() {
 
-            _ctx.clearRect(0, 0, canvas.width, canvas.height);
+            _surface.clearRect(0, 0, canvas.width, canvas.height);
 
-            _ctx.drawImage(_snapshot.canvas, 0, 0);
-            _ctx.drawImage(_clone.canvas, 0, 0);
+            _surface.drawImage(_snapshot.canvas, 0, 0);
+            _surface.drawImage(_toolSurface.canvas, 0, 0);
         };
 
         this.drawStart = function(wayPoint) {
 
             _snapshot.drawImage(canvas, 0, 0);
-            _clone.clearRect(0, 0, canvas.width, canvas.height);
+            _toolSurface.clearRect(0, 0, canvas.width, canvas.height);
 
-            tool.start(wayPoint.x, wayPoint.y, _clone);
+            tool.start(wayPoint.x, wayPoint.y, _toolSurface);
             render();
         };
 
         this.drawAt = function(wayPoint) {
 
-            tool.draw(wayPoint.x, wayPoint.y, _clone);
+            tool.draw(wayPoint.x, wayPoint.y, _toolSurface);
             render();
         };
 
         this.drawEnd = function(wayPoint) {
-            tool.end(wayPoint.x, wayPoint.y, _clone);
+            tool.end(wayPoint.x, wayPoint.y, _toolSurface);
             _snapshot.drawImage(canvas, 0, 0);
 
             render();
         };
 
         this.clear = function() {
-            _ctx.clearRect(0, 0, canvas.width, canvas.height);
+            _surface.clearRect(0, 0, canvas.width, canvas.height);
             _snapshot.clearRect(0, 0, canvas.width, canvas.height);
-            _clone.clearRect(0, 0, canvas.width, canvas.height);
+            _toolSurface.clearRect(0, 0, canvas.width, canvas.height);
         }
     };
 
@@ -157,7 +157,7 @@ var App = ((function() {
      * Should listen to draw events, record paths and delegate render to Painter
      */
     var DrawController = function(painter, paths) {
-        var _currentPath = [];
+        var _currentPath = []; // a path, is just an array of wayPoints :P
 
         this.onDrawStart = function(wayPoint) {
             _currentPath = [wayPoint];
@@ -178,14 +178,14 @@ var App = ((function() {
     };
 
     // because real men don't use libraries :P
-    var asyncLoop = function(collection, action, onDone) {
-        onDone = (onDone || function() {});
+    var asyncLoop = function(collection, action, done) {
+        done = (done || function() {});
 
         if (collection.length === 0 )
-            return onDone();
+            return done();
 
         action(collection[0], function() {
-            asyncLoop(collection.slice(1), action, onDone);
+            asyncLoop(collection.slice(1), action, done);
         });
     };
 
@@ -208,7 +208,8 @@ var App = ((function() {
                     return next();
 
                 var offsetTime = null; // from the first anim frame
-                var index = 0;
+                var index = 0; // current index in this path, we don't clone or mutate,
+                               // because we want to be fast
 
                 var renderWayPoint = function(index) {
                     if (index === 0)
@@ -221,20 +222,23 @@ var App = ((function() {
                 };
 
                 var renderNextFrame = function(timestamp) {
-                    if (!offsetTime)
+                    if (!offsetTime) // first call ?
                         offsetTime = timestamp;
 
                     var currentTime = (timestamp - offsetTime);
 
-                    while (path[index].deltaTime <= currentTime) {
-                        if (index === path.length-1)
-                            return next();
-
+                    // advance until we catch-up with current time delta
+                    while (index < path.length && path[index].deltaTime <= currentTime) {
                         renderWayPoint(index);
                         index++;
                     }
 
-                    requestAnimationFrame(renderNextFrame);
+                    // next frame? or done
+                    if (index < path.length)
+                        requestAnimationFrame(renderNextFrame);
+                    else
+                        return next();
+
                 };
 
                 // dispatch first
